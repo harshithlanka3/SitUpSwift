@@ -39,6 +39,10 @@ class CameraViewController: UIViewController {
   private var sessionStatusLabel: UILabel!
   private var sessionUpdateTimer: Timer?
   
+  // Posture detection UI elements
+  private var postureLabel: UILabel!
+  private var postureDebugLabel: UILabel!
+  
   private var isSessionRunning = false
   private var isObserving = false
   private let backgroundQueue = DispatchQueue(label: "com.google.mediapipe.cameraController.backgroundQueue")
@@ -100,6 +104,7 @@ class CameraViewController: UIViewController {
     super.viewDidLoad()
     cameraFeedService.delegate = self
     setupSessionUI()
+    setupPostureUI()
     // Do any additional setup after loading the view.
   }
   
@@ -141,6 +146,48 @@ class CameraViewController: UIViewController {
       sessionStatusLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
       sessionStatusLabel.widthAnchor.constraint(equalToConstant: 200),
       sessionStatusLabel.heightAnchor.constraint(equalToConstant: 30)
+    ])
+  }
+  
+  private func setupPostureUI() {
+    // Create posture label
+    postureLabel = UILabel()
+    postureLabel.text = "Posture: --"
+    postureLabel.textColor = .white
+    postureLabel.font = UIFont.boldSystemFont(ofSize: 20)
+    postureLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+    postureLabel.textAlignment = .center
+    postureLabel.layer.cornerRadius = 8
+    postureLabel.clipsToBounds = true
+    postureLabel.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(postureLabel)
+    
+    // Create posture debug label
+    postureDebugLabel = UILabel()
+    postureDebugLabel.text = ""
+    postureDebugLabel.textColor = UIColor(white: 0.8, alpha: 1.0)
+    postureDebugLabel.font = UIFont.systemFont(ofSize: 12)
+    postureDebugLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+    postureDebugLabel.textAlignment = .left
+    postureDebugLabel.layer.cornerRadius = 8
+    postureDebugLabel.clipsToBounds = true
+    postureDebugLabel.numberOfLines = 0
+    postureDebugLabel.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(postureDebugLabel)
+    
+    // Layout constraints
+    NSLayoutConstraint.activate([
+      // Posture label - below session status
+      postureLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+      postureLabel.topAnchor.constraint(equalTo: sessionStatusLabel.bottomAnchor, constant: 10),
+      postureLabel.widthAnchor.constraint(equalToConstant: 250),
+      postureLabel.heightAnchor.constraint(equalToConstant: 40),
+      
+      // Posture debug label - below posture label
+      postureDebugLabel.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 30),
+      postureDebugLabel.topAnchor.constraint(equalTo: postureLabel.bottomAnchor, constant: 10),
+      postureDebugLabel.widthAnchor.constraint(equalToConstant: 350),
+      postureDebugLabel.heightAnchor.constraint(equalToConstant: 60)
     ])
   }
   
@@ -191,8 +238,9 @@ class CameraViewController: UIViewController {
       alert.addAction(UIAlertAction(title: "OK", style: .default))
       present(alert, animated: true)
     } else {
-      // Start session
-      SessionManager.shared.startSession()
+      // Start session with image dimensions for posture calculation
+      let imageSize = cameraFeedService.videoResolution
+      SessionManager.shared.startSession(imageWidth: imageSize.width, imageHeight: imageSize.height)
       sessionButton.isSelected = true
       sessionButton.backgroundColor = UIColor.systemRed.withAlphaComponent(0.8)
       updateSessionStatus()
@@ -386,6 +434,34 @@ extension CameraViewController: PoseLandmarkerServiceLiveStreamDelegate {
           imageContentMode: weakSelf.overlayView.imageContentMode,
           andOrientation: UIImage.Orientation.from(
             deviceOrientation: UIDevice.current.orientation))
+        
+        // Detect posture from first pose if available
+        var postureResult: PostureDetectionResult? = nil
+        if let firstPoseLandmarks = poseLandmarkerResult.landmarks.first {
+          postureResult = PostureDetectionService.detectPosture(
+            from: firstPoseLandmarks,
+            imageWidth: imageSize.width,
+            imageHeight: imageSize.height
+          )
+          
+          // Update posture UI
+          if let posture = postureResult {
+            weakSelf.postureLabel.text = "Posture: \(posture.postureType.label)"
+            weakSelf.postureLabel.backgroundColor = posture.postureType.color.withAlphaComponent(0.8)
+            
+            let viewAngle = posture.isSideView ? "SIDE" : (posture.isFacingLeft ? "LEFT" : "RIGHT")
+            let debugText = String(format: "T1:%.0f T2:%.0f T3:%.0f T4:%.0f\nView: %@",
+                                   posture.theta1, posture.theta2, posture.theta3, posture.theta4,
+                                   viewAngle)
+            weakSelf.postureDebugLabel.text = debugText
+          } else {
+            weakSelf.postureLabel.text = "Posture: --"
+            weakSelf.postureLabel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+            weakSelf.postureDebugLabel.text = ""
+          }
+        }
+        
+        weakSelf.overlayView.postureResult = postureResult
         weakSelf.overlayView.draw(poseOverlays: poseOverlays,
                          inBoundsOfContentImageOfSize: imageSize,
                          imageContentMode: weakSelf.cameraFeedService.videoGravity.contentMode)

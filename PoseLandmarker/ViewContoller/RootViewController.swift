@@ -70,6 +70,34 @@ class RootViewController: UIViewController {
     runningModeTabbar.delegate = self
     instantiateCameraViewController()
     switchTo(childViewController: cameraViewController, fromViewController: nil)
+    setupLogoutButton()
+  }
+  
+  private func setupLogoutButton() {
+    let logoutButton = UIBarButtonItem(
+      title: "Logout",
+      style: .plain,
+      target: self,
+      action: #selector(logoutTapped)
+    )
+    navigationItem.rightBarButtonItem = logoutButton
+  }
+  
+  @objc private func logoutTapped() {
+    let alert = UIAlertController(
+      title: "Logout",
+      message: "Are you sure you want to logout?",
+      preferredStyle: .alert
+    )
+    alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+    alert.addAction(UIAlertAction(title: "Logout", style: .destructive) { _ in
+      UserAuthService.shared.logout()
+      // Show auth screen
+      if let sceneDelegate = UIApplication.shared.connectedScenes.first?.delegate as? SceneDelegate {
+        sceneDelegate.showAuthScreen()
+      }
+    })
+    present(alert, animated: true)
   }
   
   override func viewWillLayoutSubviews() {

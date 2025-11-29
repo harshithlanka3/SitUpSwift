@@ -30,6 +30,9 @@
 		EC88F7762EBBE2D50029E973 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC88F7752EBBE2D50029E973 /* SessionManager.swift */; };
 		EC88F7782EBBE4CB0029E973 /* FirebaseSessionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC88F7772EBBE4CB0029E973 /* FirebaseSessionService.swift */; };
 		EC88F77A2EBBE5F40029E973 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = EC88F7792EBBE5F40029E973 /* GoogleService-Info.plist */; };
+		ECABF0D22ECAB82F008CB320 /* UserAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECABF0D12ECAB82F008CB320 /* UserAuthService.swift */; };
+		ECABF0D42ECAB837008CB320 /* AuthViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECABF0D32ECAB837008CB320 /* AuthViewController.swift */; };
+		ECABF0D62ECAB850008CB320 /* PostureDetectionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECABF0D52ECAB850008CB320 /* PostureDetectionService.swift */; };
 		FA59FA5268D0C1CD91481592 /* libPods-PoseLandmarkerTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 9AA2A96F11E3A326401F36F2 /* libPods-PoseLandmarkerTests.a */; };
 /* End PBXBuildFile section */
 
@@ -75,6 +78,9 @@
 		EC88F7752EBBE2D50029E973 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 		EC88F7772EBBE4CB0029E973 /* FirebaseSessionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirebaseSessionService.swift; sourceTree = "<group>"; };
 		EC88F7792EBBE5F40029E973 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		ECABF0D12ECAB82F008CB320 /* UserAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserAuthService.swift; sourceTree = "<group>"; };
+		ECABF0D32ECAB837008CB320 /* AuthViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewController.swift; sourceTree = "<group>"; };
+		ECABF0D52ECAB850008CB320 /* PostureDetectionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostureDetectionService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -179,6 +185,7 @@
 		BF49F9292BA821B80075959B /* ViewContoller */ = {
 			isa = PBXGroup;
 			children = (
+				ECABF0D32ECAB837008CB320 /* AuthViewController.swift */,
 				BF49F9252BA821B80075959B /* BottomSheetViewController.swift */,
 				BF49F9262BA821B80075959B /* CameraViewController.swift */,
 				BF49F9272BA821B80075959B /* MediaLibraryViewController.swift */,
@@ -190,6 +197,8 @@
 		BF49F92C2BA821B80075959B /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				ECABF0D12ECAB82F008CB320 /* UserAuthService.swift */,
+				ECABF0D52ECAB850008CB320 /* PostureDetectionService.swift */,
 				EC88F7772EBBE4CB0029E973 /* FirebaseSessionService.swift */,
 				EC88F7752EBBE2D50029E973 /* SessionManager.swift */,
 				BF49F92A2BA821B80075959B /* CameraFeedService.swift */,
@@ -342,9 +351,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-PoseLandmarker/Pods-PoseLandmarker-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-PoseLandmarker/Pods-PoseLandmarker-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -403,8 +416,11 @@
 				BF49F9312BA821B80075959B /* BottomSheetViewController.swift in Sources */,
 				BF49F9342BA821B80075959B /* RootViewController.swift in Sources */,
 				EC88F7762EBBE2D50029E973 /* SessionManager.swift in Sources */,
+				ECABF0D22ECAB82F008CB320 /* UserAuthService.swift in Sources */,
+				ECABF0D62ECAB850008CB320 /* PostureDetectionService.swift in Sources */,
 				BF49F9212BA81F730075959B /* SceneDelegate.swift in Sources */,
 				BF49F9352BA821B80075959B /* CameraFeedService.swift in Sources */,
+				ECABF0D42ECAB837008CB320 /* AuthViewController.swift in Sources */,
 				BF49F9302BA821B80075959B /* InferenceConfigurationManager.swift in Sources */,
 				BF49F9322BA821B80075959B /* CameraViewController.swift in Sources */,
 				BF49F8F12BA81E6E0075959B /* AppDelegate.swift in Sources */,

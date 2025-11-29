@@ -33,6 +33,7 @@ struct PoseOverlay {
 class OverlayView: UIView {
 
   var poseOverlays: [PoseOverlay] = []
+  var postureResult: PostureDetectionResult? = nil
 
   private var contentImageSize: CGSize = CGSizeZero
   var imageContentMode: UIView.ContentMode = .scaleAspectFit
@@ -74,6 +75,7 @@ class OverlayView: UIView {
 
   func clear() {
     poseOverlays = []
+    postureResult = nil
     contentImageSize = CGSize.zero
     imageContentMode = .scaleAspectFit
     orientation = UIDevice.current.orientation
@@ -85,6 +87,11 @@ class OverlayView: UIView {
     for poseOverlay in poseOverlays {
       drawLines(poseOverlay.lines)
       drawDots(poseOverlay.dots)
+    }
+    
+    // Draw posture skeleton if available
+    if let posture = postureResult {
+      drawPostureSkeleton(posture)
     }
   }
 
@@ -167,6 +174,48 @@ class OverlayView: UIView {
     path.lineWidth = DefaultConstants.lineWidth
     DefaultConstants.lineColor.setStroke()
     path.stroke()
+  }
+  
+  /**
+   * Draw posture skeleton (head-neck-chest-hip) with color coding
+   */
+  private func drawPostureSkeleton(_ posture: PostureDetectionResult) {
+    let offsetsAndScaleFactor = OverlayView.offsetsAndScaleFactor(
+      forImageOfSize: self.contentImageSize,
+      tobeDrawnInViewOfSize: self.bounds.size,
+      withContentMode: imageContentMode)
+    
+    // Transform points to overlay coordinates
+    func transformPoint(_ point: CGPoint) -> CGPoint {
+      let x = point.x * offsetsAndScaleFactor.scaleFactor + offsetsAndScaleFactor.xOffset
+      let y = point.y * offsetsAndScaleFactor.scaleFactor + offsetsAndScaleFactor.yOffset
+      return CGPoint(x: x, y: y)
+    }
+    
+    let head = transformPoint(posture.headPoint)
+    let neck = transformPoint(posture.neckPoint)
+    let chest = transformPoint(posture.chestPoint)
+    let hip = transformPoint(posture.hipPoint)
+    
+    // Draw skeleton lines (yellow)
+    let skeletonPath = UIBezierPath()
+    skeletonPath.move(to: head)
+    skeletonPath.addLine(to: neck)
+    skeletonPath.move(to: neck)
+    skeletonPath.addLine(to: chest)
+    skeletonPath.move(to: chest)
+    skeletonPath.addLine(to: hip)
+    skeletonPath.lineWidth = 2.0
+    UIColor(red: 1.0, green: 1.0, blue: 0.0, alpha: 1.0).setStroke() // Yellow
+    skeletonPath.stroke()
+    
+    // Draw joints (cyan circles)
+    let jointRadius: CGFloat = 6.0
+    for point in [head, neck, chest, hip] {
+      let circlePath = UIBezierPath(arcCenter: point, radius: jointRadius, startAngle: 0, endAngle: .pi * 2, clockwise: true)
+      UIColor(red: 0.0, green: 1.0, blue: 1.0, alpha: 1.0).setFill() // Cyan
+      circlePath.fill()
+    }
   }
 
   // MARK: Helper Functions

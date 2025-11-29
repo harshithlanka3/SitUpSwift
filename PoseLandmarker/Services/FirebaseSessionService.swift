@@ -58,17 +58,60 @@ struct PoseData: Codable {
   }
 }
 
+/**
+ * Posture information for a frame
+ */
+struct PostureInfo: Codable {
+  let postureType: String  // "good", "lPosture", "tPosture"
+  let theta1: Double  // Angle between head and neck
+  let theta2: Double  // Angle between neck and chest
+  let theta3: Double  // Angle between chest and hip
+  let theta4: Double  // Weighted angle
+  let isSideView: Bool
+  
+  init(from postureResult: PostureDetectionResult) {
+    // Convert posture type to string
+    switch postureResult.postureType {
+    case .good:
+      self.postureType = "good"
+    case .lPosture:
+      self.postureType = "lPosture"
+    case .tPosture:
+      self.postureType = "tPosture"
+    }
+    self.theta1 = postureResult.theta1
+    self.theta2 = postureResult.theta2
+    self.theta3 = postureResult.theta3
+    self.theta4 = postureResult.theta4
+    self.isSideView = postureResult.isSideView
+  }
+}
+
 struct PoseFrameData: Codable {
   let timestamp: Date
   let poses: [PoseData]  // Changed from [[LandmarkData]] to [PoseData]
+  let posture: PostureInfo?  // Posture information for the first pose (if detected)
   
-  init(from result: PoseLandmarkerResult, timestamp: Date) {
+  init(from result: PoseLandmarkerResult, timestamp: Date, imageWidth: CGFloat? = nil, imageHeight: CGFloat? = nil) {
     self.timestamp = timestamp
     // Use worldLandmarks (world coordinates in meters) for storage
     // Note: Display still uses normalized landmarks from result.landmarks
     self.poses = result.worldLandmarks.map { poseWorldLandmarks in
       let landmarks = poseWorldLandmarks.map { LandmarkData(from: $0) }
       return PoseData(landmarks: landmarks)
+    }
+    
+    // Calculate posture if we have image dimensions and landmarks
+    if let imageWidth = imageWidth,
+       let imageHeight = imageHeight,
+       let firstPoseLandmarks = result.landmarks.first {
+      self.posture = PostureDetectionService.detectPosture(
+        from: firstPoseLandmarks,
+        imageWidth: imageWidth,
+        imageHeight: imageHeight
+      ).map { PostureInfo(from: $0) }
+    } else {
+      self.posture = nil
     }
   }
 }
@@ -162,10 +205,13 @@ class FirebaseSessionService {
   func uploadFrameBatch(
     sessionId: String,
     frames: [PoseFrameData],
+    userId: String,
     completion: ((Result<Int, Error>) -> Void)? = nil
   ) {
     let batch = db.batch()
-    let framesRef = db.collection(sessionsCollection)
+    let framesRef = db.collection("users")
+      .document(userId)
+      .collection(sessionsCollection)
       .document(sessionId)
       .collection("frames")
     
@@ -201,16 +247,28 @@ class FirebaseSessionService {
     sessionId: String,
     startTime: Date,
     frameCount: Int,
-    isActive: Bool = true
+    userId: String,
+    isActive: Bool = true,
+    postureStats: [String: Int]? = nil  // Optional: counts of each posture type
   ) {
-    let sessionRef = db.collection(sessionsCollection).document(sessionId)
-    sessionRef.setData([
+    var data: [String: Any] = [
       "sessionId": sessionId,
       "startTime": startTime,
       "frameCount": frameCount,
       "isActive": isActive,
       "lastUpdated": Date()
-    ], merge: true) { error in
+    ]
+    
+    // Add posture statistics if provided
+    if let stats = postureStats {
+      data["postureStats"] = stats
+    }
+    
+    let sessionRef = db.collection("users")
+      .document(userId)
+      .collection(sessionsCollection)
+      .document(sessionId)
+    sessionRef.setData(data, merge: true) { error in
       if let error = error {
         print("Error updating session metadata: \(error.localizedDescription)")
       }
@@ -223,9 +281,13 @@ class FirebaseSessionService {
   func finalizeSession(
     sessionId: String,
     endTime: Date,
+    userId: String,
     completion: ((Result<String, Error>) -> Void)? = nil
   ) {
-    let sessionRef = db.collection(sessionsCollection).document(sessionId)
+    let sessionRef = db.collection("users")
+      .document(userId)
+      .collection(sessionsCollection)
+      .document(sessionId)
     
     // Get start time first to calculate duration
     sessionRef.getDocument { document, error in

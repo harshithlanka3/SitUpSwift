@@ -28,6 +28,8 @@ class SessionManager {
   private var sessionStartTime: Date?
   private var sessionId: String?
   private var totalFrameCount: Int = 0
+  private var imageWidth: CGFloat? = nil  // Store image dimensions for posture calculation
+  private var imageHeight: CGFloat? = nil
   private let batchSize = 50  // Upload every 50 frames to keep memory low
   private let queue = DispatchQueue(label: "com.mediapipe.sessionManager", attributes: .concurrent)
   
@@ -36,8 +38,10 @@ class SessionManager {
   /**
    * Starts a new recording session.
    * Clears any previous session data and creates session metadata in Firebase.
+   * @param imageWidth Optional image width for posture calculation
+   * @param imageHeight Optional image height for posture calculation
    */
-  func startSession() {
+  func startSession(imageWidth: CGFloat? = nil, imageHeight: CGFloat? = nil) {
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self else { return }
       self.isSessionActive = true
@@ -45,13 +49,18 @@ class SessionManager {
       self.sessionStartTime = Date()
       self.sessionId = UUID().uuidString
       self.totalFrameCount = 0
+      self.imageWidth = imageWidth
+      self.imageHeight = imageHeight
       
       // Create session metadata document in Firebase
-      if let sessionId = self.sessionId, let startTime = self.sessionStartTime {
+      if let sessionId = self.sessionId, 
+         let startTime = self.sessionStartTime,
+         let userId = UserAuthService.shared.currentUserId {
         FirebaseSessionService.shared.createOrUpdateSessionMetadata(
           sessionId: sessionId,
           startTime: startTime,
-          frameCount: 0
+          frameCount: 0,
+          userId: userId
         )
       }
     }
@@ -96,18 +105,21 @@ class SessionManager {
     if saveToFirebase, 
        let sessionId = sessionId, 
        let startTime = startTime,
+       let userId = UserAuthService.shared.currentUserId,
        !finalBatch.isEmpty {
       uploadBatch(
         sessionId: sessionId,
         startTime: startTime,
         batch: finalBatch,
         frameOffset: frameCount - finalBatch.count,
+        userId: userId,
         completion: { (uploadResult: Result<Int, Error>) in
           // After final batch upload, finalize session
           if case .success = uploadResult {
             FirebaseSessionService.shared.finalizeSession(
               sessionId: sessionId,
-              endTime: endTime
+              endTime: endTime,
+              userId: userId
             ) { result in
               completion?(result)
             }
@@ -115,18 +127,22 @@ class SessionManager {
             // Even if upload fails, try to finalize
             FirebaseSessionService.shared.finalizeSession(
               sessionId: sessionId,
-              endTime: endTime
+              endTime: endTime,
+              userId: userId
             ) { result in
               completion?(result)
             }
           }
         }
       )
-    } else if saveToFirebase, let sessionId = sessionId {
+    } else if saveToFirebase, 
+              let sessionId = sessionId,
+              let userId = UserAuthService.shared.currentUserId {
       // No remaining frames, just finalize
       FirebaseSessionService.shared.finalizeSession(
         sessionId: sessionId,
-        endTime: endTime
+        endTime: endTime,
+        userId: userId
       ) { result in
         completion?(result)
       }
@@ -140,6 +156,8 @@ class SessionManager {
       self?.sessionId = nil
       self?.sessionStartTime = nil
       self?.totalFrameCount = 0
+      self?.imageWidth = nil
+      self?.imageHeight = nil
     }
   }
   
@@ -163,12 +181,15 @@ class SessionManager {
         self.currentBatch.removeAll()  // Clear buffer after copying
         
         // Upload asynchronously
-        if let sessionId = self.sessionId, let startTime = self.sessionStartTime {
+        if let sessionId = self.sessionId, 
+           let startTime = self.sessionStartTime,
+           let userId = UserAuthService.shared.currentUserId {
           self.uploadBatch(
             sessionId: sessionId,
             startTime: startTime,
             batch: batchToUpload,
             frameOffset: frameOffset,
+            userId: userId,
             completion: nil
           )
         }
@@ -184,19 +205,25 @@ class SessionManager {
     startTime: Date,
     batch: [PoseLandmarkerResult],
     frameOffset: Int,
+    userId: String,
     completion: ((Result<Int, Error>) -> Void)? = nil
   ) {
-    // Convert to PoseFrameData
+    // Get image dimensions for posture calculation
+    let imgWidth = queue.sync { self.imageWidth }
+    let imgHeight = queue.sync { self.imageHeight }
+    
+    // Convert to PoseFrameData with posture information
     let frames = batch.enumerated().map { index, result in
       let frameIndex = frameOffset + index
       let frameTimestamp = startTime.addingTimeInterval(Double(frameIndex) * 0.033) // ~30fps
-      return PoseFrameData(from: result, timestamp: frameTimestamp)
+      return PoseFrameData(from: result, timestamp: frameTimestamp, imageWidth: imgWidth, imageHeight: imgHeight)
     }
     
     // Upload batch to Firebase
     FirebaseSessionService.shared.uploadFrameBatch(
       sessionId: sessionId,
-      frames: frames
+      frames: frames,
+      userId: userId
     ) { [weak self] result in
       switch result {
       case .success(let count):
@@ -204,11 +231,13 @@ class SessionManager {
         // Update session metadata with current frame count
         if let self = self, 
            let sessionId = self.sessionId, 
-           let startTime = self.sessionStartTime {
+           let startTime = self.sessionStartTime,
+           let currentUserId = UserAuthService.shared.currentUserId {
           FirebaseSessionService.shared.createOrUpdateSessionMetadata(
             sessionId: sessionId,
             startTime: startTime,
-            frameCount: self.totalFrameCount
+            frameCount: self.totalFrameCount,
+            userId: currentUserId
           )
         }
         completion?(result)
