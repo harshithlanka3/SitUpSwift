@@ -47,6 +47,10 @@ class CameraViewController: UIViewController {
   private var isObserving = false
   private let backgroundQueue = DispatchQueue(label: "com.google.mediapipe.cameraController.backgroundQueue")
   
+  // Monotonic timestamp tracking for MediaPipe
+  private var lastTimestamp: Int = 0
+  private let timestampQueue = DispatchQueue(label: "com.google.mediapipe.cameraController.timestampQueue")
+  
   // MARK: Controllers that manage functionality
   // Handles all the camera related functionality
   private lazy var cameraFeedService = CameraFeedService(previewView: previewView)
@@ -334,6 +338,10 @@ class CameraViewController: UIViewController {
   
   @objc private func clearAndInitializePoseLandmarkerService() {
     poseLandmarkerService = nil
+    // Reset timestamp counter when reinitializing pose landmarker
+    timestampQueue.async { [weak self] in
+      self?.lastTimestamp = 0
+    }
     poseLandmarkerService = PoseLandmarkerService
       .liveStreamPoseLandmarkerService(
         modelPath: InferenceConfigurationManager.sharedInstance.model.modelPath,
@@ -373,13 +381,25 @@ class CameraViewController: UIViewController {
 extension CameraViewController: CameraFeedServiceDelegate {
   
   func didOutput(sampleBuffer: CMSampleBuffer, orientation: UIImage.Orientation) {
-    let currentTimeMs = Date().timeIntervalSince1970 * 1000
+    // Generate monotonic timestamp to ensure MediaPipe receives strictly increasing timestamps
+    let timestamp = timestampQueue.sync { [weak self] in
+      guard let self = self else { return 0 }
+      let currentTimeMs = Int(Date().timeIntervalSince1970 * 1000)
+      // Ensure timestamp is always greater than the last one
+      if currentTimeMs <= self.lastTimestamp {
+        self.lastTimestamp += 1
+      } else {
+        self.lastTimestamp = currentTimeMs
+      }
+      return self.lastTimestamp
+    }
+    
     // Pass the pixel buffer to mediapipe
     backgroundQueue.async { [weak self] in
       self?.poseLandmarkerService?.detectAsync(
         sampleBuffer: sampleBuffer,
         orientation: orientation,
-        timeStamps: Int(currentTimeMs))
+        timeStamps: timestamp)
     }
   }
   
@@ -421,21 +441,9 @@ extension CameraViewController: PoseLandmarkerServiceLiveStreamDelegate {
         weakSelf.inferenceResultDeliveryDelegate?.didPerformInference(result: result)
         guard let poseLandmarkerResult = result?.poseLandmarkerResults.first as? PoseLandmarkerResult else { return }
         
-        // Store landmarks if session is active
-        if SessionManager.shared.getSessionActive() {
-          SessionManager.shared.addLandmarks(poseLandmarkerResult)
-        }
-        
         let imageSize = weakSelf.cameraFeedService.videoResolution
-        let poseOverlays = OverlayView.poseOverlays(
-            fromMultiplePoseLandmarks: poseLandmarkerResult.landmarks,
-          inferredOnImageOfSize: imageSize,
-          ovelayViewSize: weakSelf.overlayView.bounds.size,
-          imageContentMode: weakSelf.overlayView.imageContentMode,
-          andOrientation: UIImage.Orientation.from(
-            deviceOrientation: UIDevice.current.orientation))
         
-        // Detect posture from first pose if available
+        // Calculate posture on main thread (safe access to landmarks) - used for both storage and UI
         var postureResult: PostureDetectionResult? = nil
         if let firstPoseLandmarks = poseLandmarkerResult.landmarks.first {
           postureResult = PostureDetectionService.detectPosture(
@@ -460,6 +468,19 @@ extension CameraViewController: PoseLandmarkerServiceLiveStreamDelegate {
             weakSelf.postureDebugLabel.text = ""
           }
         }
+        
+        // Store landmarks if session is active (with pre-calculated posture)
+        if SessionManager.shared.getSessionActive() {
+          SessionManager.shared.addLandmarks(poseLandmarkerResult, posture: postureResult)
+        }
+        
+        let poseOverlays = OverlayView.poseOverlays(
+            fromMultiplePoseLandmarks: poseLandmarkerResult.landmarks,
+          inferredOnImageOfSize: imageSize,
+          ovelayViewSize: weakSelf.overlayView.bounds.size,
+          imageContentMode: weakSelf.overlayView.imageContentMode,
+          andOrientation: UIImage.Orientation.from(
+            deviceOrientation: UIDevice.current.orientation))
         
         weakSelf.overlayView.postureResult = postureResult
         weakSelf.overlayView.draw(poseOverlays: poseOverlays,

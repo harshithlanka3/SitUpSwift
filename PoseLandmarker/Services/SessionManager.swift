@@ -30,6 +30,9 @@ class SessionManager {
   private var totalFrameCount: Int = 0
   private var imageWidth: CGFloat? = nil  // Store image dimensions for posture calculation
   private var imageHeight: CGFloat? = nil
+  // Thread-safe storage for posture data by frame index
+  private var postureData: [Int: PostureDetectionResult] = [:]
+  private let postureQueue = DispatchQueue(label: "com.mediapipe.sessionManager.posture", attributes: .concurrent)
   private let batchSize = 50  // Upload every 50 frames to keep memory low
   private let queue = DispatchQueue(label: "com.mediapipe.sessionManager", attributes: .concurrent)
   
@@ -51,6 +54,11 @@ class SessionManager {
       self.totalFrameCount = 0
       self.imageWidth = imageWidth
       self.imageHeight = imageHeight
+      
+      // Clear posture data
+      self.postureQueue.async(flags: .barrier) {
+        self.postureData.removeAll()
+      }
       
       // Create session metadata document in Firebase
       if let sessionId = self.sessionId, 
@@ -159,20 +167,35 @@ class SessionManager {
       self?.imageWidth = nil
       self?.imageHeight = nil
     }
+    
+    // Clear posture data
+    postureQueue.async(flags: .barrier) { [weak self] in
+      self?.postureData.removeAll()
+    }
   }
   
   /**
    * Adds landmarks to the current session if active.
    * Automatically uploads batch when batchSize is reached.
+   * @param result The pose landmarker result
+   * @param posture Optional posture detection result (calculated on main thread)
    */
-  func addLandmarks(_ result: PoseLandmarkerResult?) {
+  func addLandmarks(_ result: PoseLandmarkerResult?, posture: PostureDetectionResult? = nil) {
     guard let result = result else { return }
     
     queue.async(flags: .barrier) { [weak self] in
       guard let self = self, self.isSessionActive else { return }
       
+      let currentFrameIndex = self.totalFrameCount
       self.currentBatch.append(result)
       self.totalFrameCount += 1
+      
+      // Store posture data if provided (thread-safe)
+      if let posture = posture {
+        self.postureQueue.async(flags: .barrier) {
+          self.postureData[currentFrameIndex] = posture
+        }
+      }
       
       // Upload batch when it reaches batchSize
       if self.currentBatch.count >= self.batchSize {
@@ -208,44 +231,64 @@ class SessionManager {
     userId: String,
     completion: ((Result<Int, Error>) -> Void)? = nil
   ) {
-    // Get image dimensions for posture calculation
-    let imgWidth = queue.sync { self.imageWidth }
-    let imgHeight = queue.sync { self.imageHeight }
-    
-    // Convert to PoseFrameData with posture information
-    let frames = batch.enumerated().map { index, result in
-      let frameIndex = frameOffset + index
-      let frameTimestamp = startTime.addingTimeInterval(Double(frameIndex) * 0.033) // ~30fps
-      return PoseFrameData(from: result, timestamp: frameTimestamp, imageWidth: imgWidth, imageHeight: imgHeight)
+    // Retrieve posture data for this batch (thread-safe read)
+    let batchPostureData = postureQueue.sync { () -> [Int: PostureDetectionResult] in
+      var batchPostures: [Int: PostureDetectionResult] = [:]
+      for index in 0..<batch.count {
+        let frameIndex = frameOffset + index
+        if let posture = self.postureData[frameIndex] {
+          batchPostures[frameIndex] = posture
+        }
+      }
+      return batchPostures
     }
     
-    // Upload batch to Firebase
-    FirebaseSessionService.shared.uploadFrameBatch(
-      sessionId: sessionId,
-      frames: frames,
-      userId: userId
-    ) { [weak self] result in
-      switch result {
-      case .success(let count):
-        print("Uploaded batch of \(count) frames to session \(sessionId)")
-        // Update session metadata with current frame count
-        if let self = self, 
-           let sessionId = self.sessionId, 
-           let startTime = self.sessionStartTime,
-           let currentUserId = UserAuthService.shared.currentUserId {
-          FirebaseSessionService.shared.createOrUpdateSessionMetadata(
-            sessionId: sessionId,
-            startTime: startTime,
-            frameCount: self.totalFrameCount,
-            userId: currentUserId
-          )
+    // Convert to PoseFrameData asynchronously to avoid blocking
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let frames = batch.enumerated().map { index, result in
+        let frameIndex = frameOffset + index
+        let frameTimestamp = startTime.addingTimeInterval(Double(frameIndex) * 0.033) // ~30fps
+        let posture = batchPostureData[frameIndex]
+        return PoseFrameData(from: result, timestamp: frameTimestamp, posture: posture)
+      }
+      
+      // Clean up posture data for this batch after creating frames
+      self?.postureQueue.async(flags: .barrier) {
+        for index in 0..<batch.count {
+          let frameIndex = frameOffset + index
+          self?.postureData.removeValue(forKey: frameIndex)
         }
-        completion?(result)
-      case .failure(let error):
-        print("Failed to upload batch: \(error.localizedDescription)")
-        completion?(result)
+      }
+      
+      // Upload batch to Firebase
+      FirebaseSessionService.shared.uploadFrameBatch(
+        sessionId: sessionId,
+        frames: frames,
+        userId: userId
+      ) { [weak self] result in
+        switch result {
+        case .success(let count):
+          print("Uploaded batch of \(count) frames to session \(sessionId)")
+          // Update session metadata with current frame count
+          if let self = self, 
+             let sessionId = self.sessionId, 
+             let startTime = self.sessionStartTime,
+             let currentUserId = UserAuthService.shared.currentUserId {
+            FirebaseSessionService.shared.createOrUpdateSessionMetadata(
+              sessionId: sessionId,
+              startTime: startTime,
+              frameCount: self.totalFrameCount,
+              userId: currentUserId
+            )
+          }
+          completion?(result)
+        case .failure(let error):
+          print("Failed to upload batch: \(error.localizedDescription)")
+          completion?(result)
+        }
       }
     }
+    
   }
   
   /**

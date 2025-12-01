@@ -90,9 +90,9 @@ struct PostureInfo: Codable {
 struct PoseFrameData: Codable {
   let timestamp: Date
   let poses: [PoseData]  // Changed from [[LandmarkData]] to [PoseData]
-  let posture: PostureInfo?  // Posture information for the first pose (if detected)
+  let posture: PostureInfo?  // Posture information (calculated on main thread, stored separately)
   
-  init(from result: PoseLandmarkerResult, timestamp: Date, imageWidth: CGFloat? = nil, imageHeight: CGFloat? = nil) {
+  init(from result: PoseLandmarkerResult, timestamp: Date, posture: PostureDetectionResult? = nil) {
     self.timestamp = timestamp
     // Use worldLandmarks (world coordinates in meters) for storage
     // Note: Display still uses normalized landmarks from result.landmarks
@@ -101,18 +101,8 @@ struct PoseFrameData: Codable {
       return PoseData(landmarks: landmarks)
     }
     
-    // Calculate posture if we have image dimensions and landmarks
-    if let imageWidth = imageWidth,
-       let imageHeight = imageHeight,
-       let firstPoseLandmarks = result.landmarks.first {
-      self.posture = PostureDetectionService.detectPosture(
-        from: firstPoseLandmarks,
-        imageWidth: imageWidth,
-        imageHeight: imageHeight
-      ).map { PostureInfo(from: $0) }
-    } else {
-      self.posture = nil
-    }
+    // Use pre-calculated posture if provided
+    self.posture = posture.map { PostureInfo(from: $0) }
   }
 }
 
@@ -248,27 +238,19 @@ class FirebaseSessionService {
     startTime: Date,
     frameCount: Int,
     userId: String,
-    isActive: Bool = true,
-    postureStats: [String: Int]? = nil  // Optional: counts of each posture type
+    isActive: Bool = true
   ) {
-    var data: [String: Any] = [
+    let sessionRef = db.collection("users")
+      .document(userId)
+      .collection(sessionsCollection)
+      .document(sessionId)
+    sessionRef.setData([
       "sessionId": sessionId,
       "startTime": startTime,
       "frameCount": frameCount,
       "isActive": isActive,
       "lastUpdated": Date()
-    ]
-    
-    // Add posture statistics if provided
-    if let stats = postureStats {
-      data["postureStats"] = stats
-    }
-    
-    let sessionRef = db.collection("users")
-      .document(userId)
-      .collection(sessionsCollection)
-      .document(sessionId)
-    sessionRef.setData(data, merge: true) { error in
+    ], merge: true) { error in
       if let error = error {
         print("Error updating session metadata: \(error.localizedDescription)")
       }
